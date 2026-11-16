@@ -18,6 +18,18 @@
 //
 // Hoy este hook devuelve el valor sin esperar nada: por eso fallan sus pruebas.
 // Ejecuta `npm test -- useDebounce` y mira cuáles.
+import { useEffect, useState } from "react";
+
 export default function useDebounce(value, delay) {
-  return value;
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebounced(value);
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debounced;
 }

@@ -40,14 +40,71 @@
 //   · Un useEffect sin dependencias ([]) cuya limpieza aborta el controlador: es lo que corre al desmontar.
 //
 // Hoy este hook no hace nada: se queda en "idle". Ejecuta `npm test -- useAgentRun` y mira qué falla.
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const initialState = { status: "idle", plan: null, result: null, error: null };
+
 export default function useAgentRun(runAgent) {
-  return {
-    status: "idle",
-    plan: null,
-    result: null,
-    error: null,
-    start: () => {},
-    approve: () => {},
-    reject: () => {},
-  };
+  const [state, setState] = useState(initialState);
+  const stateRef = useRef(state);
+  const runAgentRef = useRef(runAgent);
+  const controllerRef = useRef(null);
+
+  stateRef.current = state;
+  runAgentRef.current = runAgent;
+
+  const start = useCallback((plan) => {
+    const { status } = stateRef.current;
+    const canStart = status === "idle" || status === "done" || status === "error";
+    const currentRunAgent = runAgentRef.current;
+    if (!canStart || !currentRunAgent) return;
+
+    const controller = new AbortController();
+    controllerRef.current = controller;
+
+    const next = { status: "running", plan, result: null, error: null };
+    stateRef.current = next;
+    setState(next);
+
+    currentRunAgent(plan, { signal: controller.signal }).then(
+      (result) => {
+        if (controller.signal.aborted) return;
+        setState({
+          status: plan.risk === "R2" ? "awaiting_approval" : "done",
+          plan,
+          result,
+          error: null,
+        });
+      },
+      (failure) => {
+        if (controller.signal.aborted) return;
+        setState({ status: "error", plan, result: null, error: failure });
+      }
+    );
+  }, []);
+
+  const approve = useCallback(() => {
+    if (stateRef.current.status !== "awaiting_approval") return;
+    const next = { ...stateRef.current, status: "done" };
+    stateRef.current = next;
+    setState(next);
+  }, []);
+
+  const reject = useCallback(() => {
+    const { status } = stateRef.current;
+    if (status !== "running" && status !== "awaiting_approval") return;
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    stateRef.current = initialState;
+    setState(initialState);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+    };
+  }, []);
+
+  return { ...state, start, approve, reject };
 }
